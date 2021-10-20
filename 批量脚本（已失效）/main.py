@@ -5,7 +5,6 @@ import random
 import re
 import string
 import time
-import traceback
 from logging import StreamHandler, FileHandler
 from urllib.parse import urlencode
 import requests
@@ -134,28 +133,17 @@ def onepost(access_token, course_id, nid, class_name, username):
     try:
         post_url = "https://jxtw.h5yunban.cn/jxtw-qndxx/cgi-bin/user-api/course/join?accessToken="
         res = requests.post(url=post_url + access_token, data=json.dumps(post_data))
-
         if res.status_code == 200:
-            res_json = res.json()
-
-            msg = res_json.get('message')
-            if msg == '选定的课程已结束学习':
-                return "OVER"
-            if res_json.get('status') == 200:
-                if class_name is None:
-                    logger.info(username + " 已经完成青年大学习！" + "token:" + access_token + " 团委id:" + nid + "团委为四级不用班级")
-                else:
-                    logger.info( username + " 已经完成青年大学习！" + "token:" + access_token + " 团委id:" + nid + " 班级:" + class_name)
+            if class_name is not None:
+                msg = res.json().get('message')
+                if msg and msg == '选定的课程已结束学习':
+                    return "OVER"
+                logger.info(username + " 已经完成青年大学习！" + "token:" + access_token + " 团委id:" + nid + " 班级:" + class_name)
             else:
-                logger.error('返回状态码异常！')
-                logger.info(res_json)
-        else:
-            logger.info('请求错误')
-
-
-
+                logger.info(username + " 已经完成青年大学习！" + "token:" + access_token + " 团委id:" + nid + "团委为四级不用班级")
     except:
         logger.info('发送请求出错！')
+
 
 def get_records(access_token):
     # 获取记录 get
@@ -171,12 +159,13 @@ def get_records(access_token):
         first_list = result_list[0]['list']
         username = first_list[0].get('cardNo')
 
-def get_token(open_id):
 
+def get_token():
     url = "https://jxtw.h5yunban.cn/jxtw-qndxx/cgi-bin/login/we-chat/callback?callback=https%3A%2F%2Fjxtw.h5yunban.cn%2Fjxtw-qndxx%2FsignUp.php&scope=snsapi_userinfo&appid=wxe9a08de52d2723ba&openid={}&{}&headimg=https://thirdwx.qlogo.cn/mmopen/vi_32/I7gbHHRj903RFibtlB4jrz1T1jTJ3eCWsCJwibQIT5hLRXO25ib9AHeqUjsPGmwhtiaBuzhQfhEZ6ibBdGbyZuM72LA/132&time={}&source=common&t={}"
     try:
         faker = Faker('zh_CN')
-        openid = open_id
+        openid = gen_rand_str(28)
+
         nickname = urlencode({'j': faker.name()})
         newurl = url.format(openid, nickname, "%d" % time.time(), "%d" % time.time())
 
@@ -193,12 +182,43 @@ def get_token(open_id):
     else:
         return token
 
+
+def generate_fake_data(nid, count):
+    '''
+    根据团委id生成count数量个的请求，灌水
+    :param nid: 团委id
+    :param count: 伪造的数量
+    :return:
+    '''
+    faker = Faker('zh_CN')
+    access_tokens = []
+    for i in range(count):
+        token = get_token()
+        if token:
+            access_tokens.append(token)
+    course_res = get_current_course_id(get_token())
+    if not course_res:
+        logger.info('获取course_id出错')
+        return
+    course_id = course_res.get('course_id')
+    course_title = course_res.get('title')
+    class_name = "班级"  # 注: 四级团委组织请将class_name修改为None,三级的自行填写班级名称
+    for token in access_tokens:
+        try:
+            class_name = random.choice(class_name)
+            username = faker.name()
+            onepost(token, course_id, nid, class_name, username)
+            get_records(token)
+        except:
+            continue
+
+
 def main():
     '''
     根据配置的txt文件批量完成青年大学习
     :return:
     '''
-    course_res = get_current_course_id(get_token(gen_rand_str(28)))
+    course_res = get_current_course_id(get_token())
     if not course_res:
         logger.info('获取course_id出错')
         return
@@ -213,13 +233,11 @@ def main():
     for i in lines:
         if not i.strip():
             continue
-        info = re.split('\s+', i.strip())
-
-        class_name = info[0]
+        info = re.split('\s', i.strip())
         nid = info[2]
+        class_name = info[0]
         username = info[1]
-        open_id = info[3]
-        token = get_token(open_id)
+        token = get_token()
         if class_name == '4级':
             class_name = None
         postres = onepost(token, course_id, nid, class_name, username)
@@ -228,10 +246,10 @@ def main():
             logger.error("选定的课程结束！")
             break
 
+
 if __name__ == '__main__':
     logger = Logger().logger
     try:
         main()
     except Exception as e:
-        traceback.print_exc()
         logger.error("发生错误！")
